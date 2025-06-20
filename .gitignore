@@ -1,3 +1,22 @@
 Ninapro/
 DB3_s1
 
+# Datasets and large data files
+/data/
+/all_orig.npy
+/all_rec.npy
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints
+
+# Results and outputs
+/results/
+/April_25/
+
+# OS-specific files
+.DS_Store
+
