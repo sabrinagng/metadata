@@ -1,84 +1,58 @@
-import os
-import random
-import pickle
-import time
-import argparse
-import numpy as np
-import pandas as pd
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-from torch.utils.data import Dataset, DataLoader, get_worker_info
+import pandas as pd
+import numpy as np
+import pickle
+import random
+import os
+import argparse
+import optuna
+
+from torch.utils.data import Dataset, DataLoader
+from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
 
-# ---------- 全局配置 ----------
-PICKLE_PATH   = "/Users/km82/Documents/metadata/noFE_windowed_segraw_allEMG.pkl"   # $B 数据
-PRETRAIN_PATH = "/Users/km82/Documents/metadata/models/sequence_masked_full_model.pth"               # Ninapro 预训练 + Optuna 最优
-SAVE_FT_PATH  = "/Users/km82/Documents/metadata/models/ft_best.pth"                       # 微调后最优
-DEVICE        = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# --- Configuration ---
+DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+PRETRAIN_PATH = os.path.join("..", "models", "sequence_masked_full_model.pth")
+PICKLE_PATH = os.path.join("..", "data", "noFE_windowed_segraw_allEMG.pkl")
+SAVE_FT_PATH = os.path.join("..", "models", "best_finetuned_model.pth")
 
-MASK_RATIO  = 0.2
-BATCH_SIZE  = 256
-MAX_EPOCHS  = 13
-LR          = 1.2157220601699218e-3
-OPTIMIZER   = "adam"          
-WEIGHT_DECAY = 1e-4           # 若想完全照 Optuna，可设为 0
-PATIENCE    = 5             
-DROPOUT_P   = 0.3
-WEIGHT_DECAY  = 1e-4
-NUM_WORKERS   = 4         
-VAL_SPLIT     = 0.1      
+# --- User Split (Fixed) ---
+# Using the same user split as before for consistency
+VAL_USERS = ['P005', 'P008', 'P010', 'P011', 'P102', 'P103', 'P104', 'P105', 'P106', 'P109', 'P110', 'P116', 'P122', 'P123', 'P126', 'P128']
+TEST_USERS = ['P004', 'P006', 'P107', 'P108', 'P111', 'P112', 'P114', 'P115', 'P118', 'P119', 'P121', 'P124', 'P125', 'P127', 'P131', 'P132']
 
-WINDOW_LEN = 400          
-IN_CH      = 12
-N_CLASSES  = 10           
-HIDDEN_DIM = 128         
-
-print("Loading $B pickle ...")
-df = pickle.load(open(PICKLE_PATH, "rb"))
-if "windowed_ts_data" in df.columns:
-    df = df.rename(columns={"windowed_ts_data": "feature"})
-
-if "Gesture_Encoded" not in df.columns:
-    df["Gesture_Encoded"] = LabelEncoder().fit_transform(df["Gesture_ID"])
-all_users = df["Participant"].unique().tolist()
-assert len(all_users) == 32, "不符合 32 位受试者，检查数据！"
-
-random.seed(42)
-VAL_USERS  = set(random.sample(all_users, 16))  
-TEST_USERS = set(all_users) - VAL_USERS   
-
-print("VAL_USERS :", sorted(VAL_USERS))
-print("TEST_USERS:", sorted(TEST_USERS), "\n")
-
-
+# --- Dataset Definition ---
 class BGestureDataset(Dataset):
     def __init__(self, df_sub):
-        self.x = np.stack(df_sub["feature"].to_numpy())
-        self.y = df_sub["Gesture_Encoded"].to_numpy()
+        self.feats = np.stack(df_sub["feature"].values)
+        self.labels = df_sub["Gesture_Encoded"].to_numpy()
 
-    def __len__(self): return len(self.x)
+    def __len__(self):
+        return len(self.feats)
 
     def __getitem__(self, idx):
-        x = torch.tensor(self.x[idx], dtype=torch.float32)
-        x = (x - x.mean(1, keepdim=True)) / (x.std(1, keepdim=True) + 1e-6)
-        return x, self.y[idx]
+        x = torch.tensor(self.feats[idx], dtype=torch.float32)
+        y = torch.tensor(self.labels[idx], dtype=torch.long)
+        # Instance-wise normalization
+        x = (x - x.mean(0, keepdim=True)) / (x.std(0, keepdim=True) + 1e-6)
+        return x, y
 
-
-class FineTuneModel(nn.Module):
-    """
-    Uses the pre-trained Encoder and adds a new classification head for fine-tuning.
-    The encoder architecture must be identical to the one used during pre-training.
-    """
-    def __init__(self, in_ch, hidden_dim, n_classes, dropout_p=0.3):
+# --- Model Definition ---
+class HybridFineTuneModel(nn.Module):
+    def __init__(self, n_classes, hidden_dim=128, dropout_p=0.5):
         super().__init__()
-        # Encoder: Structure must be identical to pre-training
+        # Encoder with a new first layer and pre-trainable 2nd/3rd layers
         self.encoder = nn.Sequential(
-            nn.Conv1d(in_ch, 64, kernel_size=5, padding=2), nn.BatchNorm1d(64), nn.ReLU(True),
-            nn.Conv1d(64, 128, kernel_size=5, padding=2),  nn.BatchNorm1d(128), nn.ReLU(True),
+            # Layer 1: New, randomly initialized for 16 channels
+            nn.Conv1d(16, 64, kernel_size=5, padding=2), nn.BatchNorm1d(64), nn.ReLU(True),
+            # Layer 2: Structure matches pre-trained model to load weights
+            nn.Conv1d(64, 128, kernel_size=5, padding=2), nn.BatchNorm1d(128), nn.ReLU(True),
+            # Layer 3: Structure matches pre-trained model to load weights
             nn.Conv1d(128, hidden_dim, kernel_size=3, padding=1), nn.BatchNorm1d(hidden_dim), nn.ReLU(True),
         )
-        # Classifier head
+        # New classification head
         self.head = nn.Sequential(
             nn.AdaptiveAvgPool1d(1),
             nn.Flatten(),
@@ -87,122 +61,179 @@ class FineTuneModel(nn.Module):
         )
 
     def forward(self, x):
+        # The input x is expected to be (B, C, T), e.g., (batch, 16, 400)
+        # We need to transpose it to (B, T, C) for Conv1d if it's not already
+        if x.shape[1] != 16:
+             x = x.transpose(1, 2)
         feat = self.encoder(x)
         logits = self.head(feat)
         return logits
 
+def load_partial_weights(new_model, pretrained_path):
+    """Loads weights from layers 2 and 3 of a pretrained encoder."""
+    try:
+        pretrained_dict = torch.load(pretrained_path, map_location=DEVICE)
+        new_model_dict = new_model.state_dict()
 
-def make_ft_loaders(batch_size=BATCH_SIZE, val_split=VAL_SPLIT):
-    """
-    Creates data loaders for fine-tuning with a given batch size and validation split.
+        weights_to_load = {}
+        # We want to load weights for layers starting from index 3 of the encoder
+        # e.g., 'encoder.3.weight', 'encoder.4.bias', etc.
+        for key, value in pretrained_dict.items():
+            if key.startswith('encoder.3.') or key.startswith('encoder.4.') or \
+               key.startswith('encoder.6.') or key.startswith('encoder.7.'):
+                if key in new_model_dict and new_model_dict[key].shape == value.shape:
+                    weights_to_load[key] = value
+        
+        new_model_dict.update(weights_to_load)
+        new_model.load_state_dict(new_model_dict)
+        print(f"Successfully loaded {len(weights_to_load)} tensors from pretrained model.")
+        return new_model
+    except FileNotFoundError:
+        print(f"Pretrained weights not found at {pretrained_path}. Training from scratch.")
+        return new_model
+    except Exception as e:
+        print(f"Error loading partial weights: {e}. Training from scratch.")
+        return new_model
 
-    Returns:
-        dl_train, dl_val, dl_test: Data loaders for training, validation, and testing.
-    """
-    df_val_all = df[df.Participant.isin(VAL_USERS)].reset_index(drop=True)
-    perm = np.random.permutation(len(df_val_all))
-    cut  = int(len(perm)*(1-val_split))
-    ds_train = BGestureDataset(df_val_all.iloc[perm[:cut]])
-    ds_val   = BGestureDataset(df_val_all.iloc[perm[cut:]])
-    dl_train = DataLoader(ds_train, batch_size, shuffle=True,
-                          num_workers=NUM_WORKERS, pin_memory=True)
-    dl_val   = DataLoader(ds_val,   batch_size, shuffle=False,
-                          num_workers=NUM_WORKERS, pin_memory=True)
+# --- Optuna Objective Function ---
+def objective(trial, df_val_users, n_classes):
+    # Hyperparameters to tune
+    lr = trial.suggest_float("lr", 1e-4, 1e-2, log=True)
+    dropout_p = trial.suggest_float("dropout", 0.1, 0.6)
+    optimizer_name = trial.suggest_categorical("optimizer", ["Adam", "AdamW", "SGD"])
+    batch_size = trial.suggest_categorical("batch_size", [128, 256, 512])
 
-    df_test  = df[df.Participant.isin(TEST_USERS)]
-    dl_test  = DataLoader(BGestureDataset(df_test), batch_size,
-                          shuffle=False, num_workers=NUM_WORKERS,
-                          pin_memory=True)
-    return dl_train, dl_val, dl_test
+    # Create train/validation split within the validation user set for HPO
+    df_train, df_val = train_test_split(df_val_users, test_size=0.2, random_state=42, stratify=df_val_users['Gesture_Encoded'])
+    ds_train = BGestureDataset(df_train)
+    ds_val = BGestureDataset(df_val)
+    dl_train = DataLoader(ds_train, batch_size=batch_size, shuffle=True, num_workers=2)
+    dl_val = DataLoader(ds_val, batch_size=batch_size, shuffle=False, num_workers=2)
 
+    # Model setup
+    model = HybridFineTuneModel(n_classes=n_classes, dropout_p=dropout_p).to(DEVICE)
+    model = load_partial_weights(model, PRETRAIN_PATH)
 
-def main(args):
-    dl_train, dl_val, dl_test = make_ft_loaders()
-
-    # 1) Model
-    model = FineTuneModel(IN_CH, HIDDEN_DIM, N_CLASSES, DROPOUT_P).to(DEVICE)
-
-    # Load pre-trained Encoder weights
-    print(f"Loading pre-trained model from {PRETRAIN_PATH}")
-    full_ckpt = torch.load(PRETRAIN_PATH, map_location=DEVICE)
-    
-    # Extract the state_dict for the encoder
-    encoder_ckpt = {k.replace('encoder.', ''): v for k, v in full_ckpt.items() if k.startswith('encoder.')}
-    model.encoder.load_state_dict(encoder_ckpt)
-    print("Successfully loaded pre-trained encoder weights.")
-
-    # Freeze Encoder
-    if not args.unfreeze:
-        for param in model.encoder.parameters():
+    # Freeze the loaded layers, train the new layer and the head
+    for name, param in model.encoder.named_parameters():
+        if not name.startswith('0.'): # Layer 0 is the new Conv1d
             param.requires_grad = False
-        print("Encoder parameters frozen.")
-        optimizer_params = model.head.parameters()
-    else:
-        print("Encoder parameters are trainable (unfrozen).")
-        optimizer_params = model.parameters()
 
-    # 2) Optimizer
-    if OPTIMIZER == "adam":
-        optimizer = torch.optim.Adam(optimizer_params, lr=LR, weight_decay=WEIGHT_DECAY)
-    elif OPTIMIZER == "adamw":
-        optimizer = torch.optim.AdamW(optimizer_params, lr=LR, weight_decay=WEIGHT_DECAY)
-    else:
-        optimizer = torch.optim.SGD(optimizer_params, lr=LR, momentum=0.9, weight_decay=WEIGHT_DECAY)
-    
+    optimizer = getattr(torch.optim, optimizer_name)(filter(lambda p: p.requires_grad, model.parameters()), lr=lr)
     criterion = nn.CrossEntropyLoss()
-    best_acc, patience_cnt = 0, 0
-
-    # 3) Training loop
-    for epoch in range(MAX_EPOCHS):
-        model.train(); train_loss = 0
-        for x,y in dl_train:
-            x,y = x.to(DEVICE), y.to(DEVICE)
+    
+    # Training loop for HPO
+    best_acc = 0
+    for epoch in range(10): # Fixed 10 epochs for HPO for speed
+        model.train()
+        for x, y in dl_train:
+            x, y = x.to(DEVICE), y.to(DEVICE)
             optimizer.zero_grad()
             logits = model(x)
             loss = criterion(logits, y)
             loss.backward()
             optimizer.step()
-            train_loss += loss.item()*y.size(0)
-        train_loss /= len(dl_train.dataset)
 
-        # ---- val ----
-        model.eval(); val_loss, n_corr, n = 0,0,0
+        model.eval()
+        correct, total = 0, 0
         with torch.no_grad():
-            for x,y in dl_val:
-                x,y = x.to(DEVICE), y.to(DEVICE)
+            for x, y in dl_val:
+                x, y = x.to(DEVICE), y.to(DEVICE)
                 logits = model(x)
-                val_loss += criterion(logits, y).item()*y.size(0)
-                n_corr  += (logits.argmax(1)==y).sum().item()
-                n += y.size(0)
-        val_loss /= n; val_acc = n_corr/n
-
-        print(f"[{epoch+1:02d}] train {train_loss:.4f} | "
-              f"val {val_loss:.4f} acc {val_acc:.2%}")
-
-        # ---- early-stop ----
-        if val_acc > best_acc:
+                _, predicted = torch.max(logits.data, 1)
+                total += y.size(0)
+                correct += (predicted == y).sum().item()
+        
+        acc = correct / total
+        if acc > best_acc:
             best_acc = acc
-            torch.save(model.state_dict(), SAVE_FT_PATH)
-            patience_cnt = 0
-        else:
-            patience_cnt += 1
-        if patience_cnt >= PATIENCE:
-            print(f"Early stopping triggered after {epoch+1} epochs.")
-            break
+        
+        trial.report(acc, epoch)
+        if trial.should_prune():
+            raise optuna.exceptions.TrialPruned()
 
-    # 4) Test on the best model
-    model.load_state_dict(torch.load(SAVE_FT_PATH))
-    model.eval(); n_corr, n = 0,0
-    with torch.no_grad():
-        for x,y in dl_test:
-            x,y = x.to(DEVICE), y.to(DEVICE)
+    return best_acc
+
+# --- Final Training and Evaluation ---
+def final_train_and_eval(best_params, df_val_users, df_test_users, n_classes):
+    print("\n--- Starting Final Training with Best Hyperparameters ---")
+    print(f"Best Parameters: {best_params}")
+
+    # DataLoaders: Train on the full validation set, test on the test set
+    ds_train = BGestureDataset(df_val_users)
+    ds_test = BGestureDataset(df_test_users)
+    dl_train = DataLoader(ds_train, batch_size=best_params['batch_size'], shuffle=True)
+    dl_test = DataLoader(ds_test, batch_size=best_params['batch_size'], shuffle=False)
+
+    # Model setup
+    model = HybridFineTuneModel(n_classes=n_classes, dropout_p=best_params['dropout']).to(DEVICE)
+    model = load_partial_weights(model, PRETRAIN_PATH)
+    
+    # Unfreeze all layers for final fine-tuning
+    for param in model.parameters():
+        param.requires_grad = True
+
+    optimizer = getattr(torch.optim, best_params['optimizer'])(model.parameters(), lr=best_params['lr'])
+    criterion = nn.CrossEntropyLoss()
+
+    # Final training loop
+    for epoch in range(20): # Train for more epochs in the final run
+        model.train()
+        for x, y in dl_train:
+            x, y = x.to(DEVICE), y.to(DEVICE)
+            optimizer.zero_grad()
             logits = model(x)
-            n_corr += (logits.argmax(1)==y).sum().item()
-            n += y.size(0)
-    print(f"\n★ FINAL TEST ACCURACY on 16 TEST_USERS: {n_corr/n:.2%}")
+            loss = criterion(logits, y)
+            loss.backward()
+            optimizer.step()
+        print(f"Final Training Epoch {epoch+1}/20, Loss: {loss.item():.4f}")
+
+    torch.save(model.state_dict(), SAVE_FT_PATH)
+    print(f"Final model saved to {SAVE_FT_PATH}")
+
+    # Final evaluation on the test set
+    model.eval()
+    correct, total = 0, 0
+    with torch.no_grad():
+        for x, y in dl_test:
+            x, y = x.to(DEVICE), y.to(DEVICE)
+            logits = model(x)
+            _, predicted = torch.max(logits.data, 1)
+            total += y.size(0)
+            correct += (predicted == y).sum().item()
+    
+    final_acc = 100 * correct / total
+    print(f"\n--- Final Test Accuracy: {final_acc:.2f}% ---")
+
+# --- Main Execution ---
+def main(n_trials):
+    # Load and prepare data
+    print("Loading and preparing data...")
+    df = pd.read_pickle(PICKLE_PATH)
+    df = df.rename(columns={"windowed_ts_data": "feature"})
+    le = LabelEncoder()
+    df["Gesture_Encoded"] = le.fit_transform(df["Gesture"])
+    n_classes = len(le.classes_)
+    
+    df_val_users = df[df.Participant.isin(VAL_USERS)].reset_index(drop=True)
+    df_test_users = df[df.Participant.isin(TEST_USERS)].reset_index(drop=True)
+    print("Data loaded.")
+
+    # --- HPO Phase ---
+    print("\n--- Starting Hyperparameter Optimization ---")
+    study = optuna.create_study(direction="maximize", pruner=optuna.pruners.MedianPruner())
+    study.optimize(lambda trial: objective(trial, df_val_users, n_classes), n_trials=n_trials)
+
+    print("\n--- Hyperparameter Optimization Finished ---")
+    print(f"Best trial accuracy: {study.best_value:.4f}")
+    print(f"Best parameters: {study.best_trial.params}")
+
+    # --- Final Training Phase ---
+    final_train_and_eval(study.best_trial.params, df_val_users, df_test_users, n_classes)
 
 if __name__ == "__main__":
-    ap = argparse.ArgumentParser(description="Fine-tuning script for EMG classification")
-    ap.add_argument("--unfreeze", action="store_true", help="Unfreeze encoder layers for full fine-tuning")
-    args = ap.parse_args()
-    main(args)
+    parser = argparse.ArgumentParser(description="Fine-tuning HPO script")
+    parser.add_argument("--n_trials", type=int, default=25, help="Number of Optuna trials")
+    args = parser.parse_args()
+    main(args.n_trials)
+

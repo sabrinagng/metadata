@@ -15,7 +15,7 @@ try:
         first_sample = df["windowed_ts_data"].iloc[0]
         
         # The shape is usually (channels, timesteps)
-        num_channels, num_timesteps = first_sample.shape
+        num_timesteps, num_channels = first_sample.shape
         
         print(f"\nData shape of the first sample: {first_sample.shape}")
         print(f"Number of Channels: {num_channels}")
