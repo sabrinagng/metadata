@@ -1,8 +1,9 @@
 import pickle
 import pandas as pd
+import os
 
 # Adjust the path to point to the correct location of the pickle file
-PICKLE_PATH = "/Users/km82/Documents/metadata/data/noFE_windowed_segraw_allEMG.pkl"
+PICKLE_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "data", "noFE_windowed_segraw_allEMG.pkl")
 
 try:
     # Load the DataFrame from the pickle file

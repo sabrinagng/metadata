@@ -5,14 +5,14 @@ from torch.utils.data import DataLoader, Dataset, get_worker_info
 from optuna.samplers import TPESampler
 from optuna.pruners import MedianPruner
 
-from masked_sequence import MaskedEMGMAE
+from .masked_sequence import MaskedEMGMAE
 
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 NUM_WORKERS = 4  # Set to 0 if you encounter subprocess issues
 WINDOW_LEN = 400
 STEP = 100
 
-PICKLE_PATH = "/Users/km82/Documents/metadata/data/noFE_windowed_segraw_allEMG.pkl"
+PICKLE_PATH = os.path.join("..", "..", "data", "noFE_windowed_segraw_allEMG.pkl")
 
 
 class EMGWindowDataset(Dataset):

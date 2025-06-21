@@ -13,8 +13,8 @@ from sklearn.preprocessing import LabelEncoder
 
 # --- Configuration ---
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-PICKLE_PATH = os.path.join("..", "data", "noFE_windowed_segraw_allEMG.pkl")
-SAVE_FT_PATH = os.path.join("..", "models", "best_hpo_model.pth")
+PICKLE_PATH = os.path.join("..", "..", "data", "noFE_windowed_segraw_allEMG.pkl")
+SAVE_FT_PATH = os.path.join("..", "..", "models", "best_hpo_model.pth")
 
 # --- User Split (Fixed) ---
 VAL_USERS = ['P005', 'P008', 'P010', 'P011', 'P102', 'P103', 'P104', 'P105', 'P106', 'P109', 'P110', 'P116', 'P122', 'P123', 'P126', 'P128']
