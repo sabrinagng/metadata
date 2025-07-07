@@ -4,8 +4,8 @@ import os
 
 # --- Configuration ---
 # Assumes the data is in the parent directory's 'data' folder
-INPUT_PICKLE_PATH = os.path.join("..", "..", "data", "noFE_windowed_segraw_allEMG.pkl")
-OUTPUT_PICKLE_PATH = os.path.join("..", "..", "data", "noFE_windowed_segraw_allEMG_64ch_12ts.pkl")
+INPUT_PICKLE_PATH = os.path.join("data", "noFE_windowed_segraw_allEMG.pkl")
+OUTPUT_PICKLE_PATH = os.path.join("data", "noFE_windowed_segraw_allEMG_64ts_12ch.pkl")
 
 # Timesteps to remove (using 0-based indexing for arrays)
 # This will remove the 9th, 11th, 13th, and 15th timestep
