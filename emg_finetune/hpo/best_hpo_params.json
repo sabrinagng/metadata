@@ -1,0 +1,16 @@
+{
+    "lr": 0.007907609859589557,
+    "optimizer": "Adam",
+    "weight_decay": 0.00015274811124714224,
+    "scheduler": "StepLR",
+    "batch_size": 256,
+    "hidden_dim": 256,
+    "num_layers": 2,
+    "kernel_size": 3,
+    "stride": 2,
+    "use_batchnorm": true,
+    "head_dropout": 0.20835785187038938,
+    "backbone": "mae",
+    "step_size": 4,
+    "gamma": 0.6584838384914755
+}
