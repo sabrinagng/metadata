@@ -10,16 +10,33 @@ class MAEEncoderBlock(nn.Module):
         super().__init__()
         self.in_ch = in_ch
         self.encoder = nn.Sequential(
-            nn.Conv1d(self.in_ch, 32, kernel_size=3, padding=1, stride=2),  # Output: (B, 32, 32)
+            # Input: (B, 12, 8192)
+            nn.Conv1d(self.in_ch, 32, kernel_size=3, padding=1, stride=2),  # Output: (B, 32, 4096)
             nn.BatchNorm1d(32), nn.ReLU(True),
-            nn.Conv1d(32, 64, kernel_size=3, padding=1, stride=2),          # Output: (B, 64, 16)
+            nn.Conv1d(32, 32, kernel_size=3, padding=1, stride=2),          # Output: (B, 32, 2048)
+            nn.BatchNorm1d(32), nn.ReLU(True),
+            nn.Conv1d(32, 64, kernel_size=3, padding=1, stride=2),          # Output: (B, 64, 1024)
             nn.BatchNorm1d(64), nn.ReLU(True),
-            nn.Conv1d(64, 128, kernel_size=3, padding=1, stride=2),         # Output: (B, 128, 8)
+            nn.Conv1d(64, 64, kernel_size=3, padding=1, stride=2),          # Output: (B, 64, 512)
+            nn.BatchNorm1d(64), nn.ReLU(True),
+            nn.Conv1d(64, 128, kernel_size=3, padding=1, stride=2),         # Output: (B, 128, 256)
             nn.BatchNorm1d(128), nn.ReLU(True),
-            nn.Conv1d(128, 256, kernel_size=3, padding=1, stride=2),        # Output: (B, 256, 4)
+            nn.Conv1d(128, 128, kernel_size=3, padding=1, stride=2),        # Output: (B, 128, 128)
+            nn.BatchNorm1d(128), nn.ReLU(True),
+            nn.Conv1d(128, 256, kernel_size=3, padding=1, stride=2),        # Output: (B, 256, 64)
             nn.BatchNorm1d(256), nn.ReLU(True),
-            nn.Conv1d(256, 512, kernel_size=4, stride=4),                   # Output: (B, 512, 1)
+            nn.Conv1d(256, 256, kernel_size=3, padding=1, stride=2),        # Output: (B, 256, 32)
+            nn.BatchNorm1d(256), nn.ReLU(True),
+            nn.Conv1d(256, 512, kernel_size=3, padding=1, stride=2),        # Output: (B, 512, 16)
             nn.BatchNorm1d(512), nn.ReLU(True),
+            nn.Conv1d(512, 512, kernel_size=3, padding=1, stride=2),        # Output: (B, 512, 8)
+            nn.BatchNorm1d(512), nn.ReLU(True),
+            nn.Conv1d(512, 1024, kernel_size=3, padding=1, stride=2),       # Output: (B, 1024, 4)
+            nn.BatchNorm1d(1024), nn.ReLU(True),
+            nn.Conv1d(1024, 1024, kernel_size=3, padding=1, stride=2),      # Output: (B, 1024, 2)
+            nn.BatchNorm1d(1024), nn.ReLU(True),
+            nn.Conv1d(1024, 2048, kernel_size=2, stride=2),                 # Output: (B, 2048, 1)
+            nn.BatchNorm1d(2048), nn.ReLU(True),
         )
 
     def forward(self, x):
@@ -30,16 +47,32 @@ class MAEDecoderBlock(nn.Module):
         super().__init__()
         self.in_ch = in_ch
         self.decoder = nn.Sequential(
-            # Input: (B, 512, 1)
-            nn.ConvTranspose1d(512, 256, kernel_size=4, stride=4),          # Output: (B, 256, 4)
+            # Input: (B, 2048, 1)
+            nn.ConvTranspose1d(2048, 1024, kernel_size=2, stride=2),        # Output: (B, 1024, 2)
+            nn.BatchNorm1d(1024), nn.ReLU(True),
+            nn.ConvTranspose1d(1024, 1024, kernel_size=4, padding=1, stride=2), # Output: (B, 1024, 4)
+            nn.BatchNorm1d(1024), nn.ReLU(True),
+            nn.ConvTranspose1d(1024, 512, kernel_size=4, padding=1, stride=2),  # Output: (B, 512, 8)
+            nn.BatchNorm1d(512), nn.ReLU(True),
+            nn.ConvTranspose1d(512, 512, kernel_size=4, padding=1, stride=2),   # Output: (B, 512, 16)
+            nn.BatchNorm1d(512), nn.ReLU(True),
+            nn.ConvTranspose1d(512, 256, kernel_size=4, padding=1, stride=2),   # Output: (B, 256, 32)
             nn.BatchNorm1d(256), nn.ReLU(True),
-            nn.ConvTranspose1d(256, 128, kernel_size=4, padding=1, stride=2), # Output: (B, 128, 8)
+            nn.ConvTranspose1d(256, 256, kernel_size=4, padding=1, stride=2),   # Output: (B, 256, 64)
+            nn.BatchNorm1d(256), nn.ReLU(True),
+            nn.ConvTranspose1d(256, 128, kernel_size=4, padding=1, stride=2),   # Output: (B, 128, 128)
             nn.BatchNorm1d(128), nn.ReLU(True),
-            nn.ConvTranspose1d(128, 64, kernel_size=4, padding=1, stride=2),  # Output: (B, 64, 16)
+            nn.ConvTranspose1d(128, 128, kernel_size=4, padding=1, stride=2),   # Output: (B, 128, 256)
+            nn.BatchNorm1d(128), nn.ReLU(True),
+            nn.ConvTranspose1d(128, 64, kernel_size=4, padding=1, stride=2),    # Output: (B, 64, 512)
             nn.BatchNorm1d(64), nn.ReLU(True),
-            nn.ConvTranspose1d(64, 32, kernel_size=4, padding=1, stride=2),   # Output: (B, 32, 32)
+            nn.ConvTranspose1d(64, 64, kernel_size=4, padding=1, stride=2),     # Output: (B, 64, 1024)
+            nn.BatchNorm1d(64), nn.ReLU(True),
+            nn.ConvTranspose1d(64, 32, kernel_size=4, padding=1, stride=2),     # Output: (B, 32, 2048)
             nn.BatchNorm1d(32), nn.ReLU(True),
-            nn.ConvTranspose1d(32, self.in_ch, kernel_size=4, padding=1, stride=2), # Output: (B, in_ch, 64)
+            nn.ConvTranspose1d(32, 32, kernel_size=4, padding=1, stride=2),     # Output: (B, 32, 4096)
+            nn.BatchNorm1d(32), nn.ReLU(True),
+            nn.ConvTranspose1d(32, self.in_ch, kernel_size=4, padding=1, stride=2), # Output: (B, in_ch, 8192)
         )
 
     def forward(self, x):
@@ -51,7 +84,7 @@ class EMGMaskedAE(nn.Module):
         in_ch: int,
         mask_type: str = 'block',
         mask_ratio: float = 0.5,
-        block_len: int = 8,
+        block_len: int = 512,
         freq_band: str = 'high',
         different_mask_per_channel = False,
         device: str = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -176,6 +209,7 @@ class EMGMaskedAE(nn.Module):
 
 ## CNN-LSTM Predictor for EMG signals
 # This model implements a CNN-LSTM architecture for predicting future EMG signals.
+# TODO: THIS PART NEEDS REWRITE
 
 class EMGConvBlock(nn.Module):
     def __init__(self, in_ch: int, out_ch: int, kernel_size: int = 3, padding: int = 1):
