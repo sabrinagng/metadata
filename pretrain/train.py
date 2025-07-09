@@ -5,7 +5,6 @@ import os
 import datetime
 import argparse
 import json
-import types
 from prettytable import PrettyTable
 
 import numpy as np
@@ -16,27 +15,25 @@ from torch.utils.data import DataLoader, random_split
 from tqdm import tqdm
 
 from model import EMGMaskedAE
-from ninapro_masked_dataset import NinaproMaskedDataset
+from ninapro_dataset import NinaproDataset
 
 # ---------------- Config ----------------
-DEVICE        = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+DEVICE          = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 # Dataloader parameters
-DATA_FOLDERS  = ['autodl-tmp/data/DB2_all']
-WINDOW_LEN    = 64
-STEP          = 16
-NUM_WORKERS   = 4
+TRAIN_DATA_PATH = 'autodl-tmp/data/Ninapro/DB2_emg_only_all_subjects.json'
+TEST_DATA_PATH  = 'autodl-tmp/data/Ninapro/DB3_emg_only_all_subjects.json'
+NUM_WORKERS     = 4
 
 # Training parameters
-BATCH_SIZE    = 4096
-EPOCHS        = 50
-LR            = 1e-3
+BATCH_SIZE      = 32
+EPOCHS          = 50
+LR              = 1e-3
 
 # Model parameters
-MASK_TYPE     = 'block'
-MASK_RATIO    = 0.4
-BLOCK_LEN     = 8
-FREQ_BAND     = 'high'
+MASK_TYPE       = 'block'
+MASK_RATIO      = 0.4
+BLOCK_LEN       = 512
 
 def train(report=False, test=False):
     print(f'Using device: {DEVICE}', flush=True)
@@ -45,19 +42,29 @@ def train(report=False, test=False):
         print(f'Current CUDA device: {torch.cuda.current_device()}', flush=True)
         print(f'Device name: {torch.cuda.get_device_name(torch.cuda.current_device())}', flush=True)
 
-    ds = NinaproMaskedDataset(DATA_FOLDERS, WINDOW_LEN, STEP)
-    train_dl = DataLoader(ds, batch_size=BATCH_SIZE, shuffle=True,
-                          num_workers=NUM_WORKERS, pin_memory=True)
+    train_ds = NinaproDataset(TRAIN_DATA_PATH)
+    train_dl = DataLoader(
+        train_ds,
+        batch_size=BATCH_SIZE,
+        shuffle=True,
+        num_workers=NUM_WORKERS,
+        pin_memory=True
+    )
 
     # --- Test Data Loading (Optional) ---
     test_dl = None
     if test:
         test_folders = ['autodl-tmp/data/DB3_emg_only']
         try:
-            test_ds = NinaproMaskedDataset(test_folders, WINDOW_LEN, STEP)
+            test_ds = NinaproDataset(TEST_DATA_PATH)
             if len(test_ds) > 0:
-                test_dl = DataLoader(test_ds, batch_size=BATCH_SIZE, shuffle=False,
-                                     num_workers=NUM_WORKERS, pin_memory=True)
+                test_dl = DataLoader(
+                    test_ds,
+                    batch_size=BATCH_SIZE,
+                    shuffle=False,
+                    num_workers=NUM_WORKERS,
+                    pin_memory=True
+                )
                 print(f'Loaded {len(test_ds)} test windows for per-epoch evaluation.', flush=True)
             else:
                 print("Warning: Test data folder provided, but no data was found.", flush=True)
@@ -66,14 +73,13 @@ def train(report=False, test=False):
 
 
     # ---------------- Model ----------------
-    in_ch = ds[0].shape[0]
+    in_ch = train_ds[0].shape[0]
     model = EMGMaskedAE(
         in_ch=in_ch,
         mask_type=MASK_TYPE,
         mask_ratio=MASK_RATIO,
         block_len=BLOCK_LEN,
         different_mask_per_channel=True,
-        freq_band=FREQ_BAND,
         device=DEVICE
     ).to(DEVICE)
     optim = torch.optim.Adam(model.parameters(), lr=LR)
@@ -173,7 +179,7 @@ def train(report=False, test=False):
                 torch.save(model.state_dict(), ckpt_path)
 
                 tqdm.write(f'  -> Saved model at epoch {epoch} to {ckpt_path}')
-
+ 
     if report:
         with open(report_path, 'w') as f:
             json.dump(report_data, f, indent=4)
