@@ -9,11 +9,15 @@ class NinaproLoader:
     """
     A class to load Ninapro dataset files.
     """
-    def __init__(self, resample_length: int = 8192):
+    def __init__(self, resample_length: int = 8192, group: str = 'DB2'):
         self.resample_length = resample_length
+        self.group = group
+        if group not in ['DB2', 'DB3']:
+            raise ValueError("Group must be either 'DB2' or 'DB3'.")
+        
         self.data = {}
 
-    def inplace_unzip(self, subject_code: str, zip_dir: str = './data/Ninapro_original/DB2/'):
+    def inplace_unzip(self, subject_code: str):
         """
         Extracts all files from a zip archive to a specified directory.
         
@@ -21,7 +25,12 @@ class NinaproLoader:
             subject_code (str): The code of the subject whose data is to be extracted.
             zip_dir (str): The directory where the zip files are located.
         """
-        zip_path = os.path.join(zip_dir, f'DB2_{subject_code}.zip')
+        if self.group == 'DB2':
+            zip_dir = './data/Ninapro_original/DB2/'
+            zip_path = os.path.join(zip_dir, f'DB2_{subject_code}.zip')
+        elif self.group == 'DB3':
+            zip_dir = './data/Ninapro_original/DB3/'
+            zip_path = os.path.join(zip_dir, f'DB3_{subject_code}.zip')
         with zipfile.ZipFile(zip_path, 'r') as zip_ref:
             zip_ref.extractall(zip_dir)
         print(f'Extracted {zip_path} to {zip_dir}')
