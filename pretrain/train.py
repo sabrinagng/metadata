@@ -54,7 +54,6 @@ def train(report=False, test=False):
     # --- Test Data Loading (Optional) ---
     test_dl = None
     if test:
-        test_folders = ['autodl-tmp/data/DB3_emg_only']
         try:
             test_ds = NinaproDataset(TEST_DATA_PATH)
             if len(test_ds) > 0:
@@ -115,7 +114,7 @@ def train(report=False, test=False):
             'test_loss_history': []
         }
         training_start_time = datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S')
-        report_path = f'/root/pretrain/training_report/{model.mask_type}/training_report_{training_start_time}.json'
+        report_path = f'metadata/pretrain/training_report/{model.mask_type}/training_report_{training_start_time}.json'
         print(f'Training report will be saved to {report_path}', flush=True)
 
     total_steps = EPOCHS * len(train_dl)
@@ -172,7 +171,7 @@ def train(report=False, test=False):
 
             # --- Save Model at End of Each Epoch ---
             if epoch % 5 == 0 or epoch == EPOCHS:
-                ckpt_dir = f'/root/pretrain/checkpoints/{model.mask_type}/{training_start_time}'
+                ckpt_dir = f'metadata/pretrain/checkpoints/{model.mask_type}/{training_start_time}'
                 os.makedirs(ckpt_dir, exist_ok=True)
 
                 ckpt_path = os.path.join(ckpt_dir, f'ckpt_{model.mask_type}_epoch_{epoch}.pth')
