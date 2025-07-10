@@ -21,9 +21,9 @@ from ninapro_dataset import NinaproDataset
 DEVICE          = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 # Dataloader parameters
-TRAIN_DATA_PATH = '../data/Ninapro/DB2_emg_only_all_subjects.json'
-TEST_DATA_PATH  = '../data/Ninapro/DB3_emg_only_all_subjects.json'
-NUM_WORKERS     = 4
+TRAIN_DATA_PATH = 'data/processed/DB2_emg_only_all_subjects'
+TEST_DATA_PATH  = 'data/processed/DB3_emg_only_all_subjects'
+NUM_WORKERS     = 0
 
 # Training parameters
 BATCH_SIZE      = 32
@@ -43,12 +43,13 @@ def train(report=False, test=False):
         print(f'Device name: {torch.cuda.get_device_name(torch.cuda.current_device())}', flush=True)
 
     train_ds = NinaproDataset(TRAIN_DATA_PATH)
+    print(f'Finished loading dataset with length {len(train_ds)}.')
     train_dl = DataLoader(
         train_ds,
         batch_size=BATCH_SIZE,
         shuffle=True,
         num_workers=NUM_WORKERS,
-        pin_memory=True
+        pin_memory=False,
     )
 
     # --- Test Data Loading (Optional) ---
@@ -62,7 +63,7 @@ def train(report=False, test=False):
                     batch_size=BATCH_SIZE,
                     shuffle=False,
                     num_workers=NUM_WORKERS,
-                    pin_memory=True
+                    pin_memory=False,
                 )
                 print(f'Loaded {len(test_ds)} test windows for per-epoch evaluation.', flush=True)
             else:
@@ -72,7 +73,7 @@ def train(report=False, test=False):
 
 
     # ---------------- Model ----------------
-    in_ch = train_ds[0].shape[0]
+    in_ch = train_ds[0][0].shape[0]
     model = EMGMaskedAE(
         in_ch=in_ch,
         mask_type=MASK_TYPE,
@@ -127,7 +128,7 @@ def train(report=False, test=False):
         for epoch in range(1, EPOCHS + 1):
             model.train()
             epoch_loss = 0.0
-            for x in train_dl:
+            for x, _ in train_dl:
                 x = x.to(DEVICE, non_blocking=True)
 
                 reconstructed = model(x)
