@@ -35,8 +35,7 @@ class MAEEncoderBlock(nn.Module):
             nn.BatchNorm1d(1024), nn.ReLU(True),
             nn.Conv1d(1024, 1024, kernel_size=3, padding=1, stride=2),      # Output: (B, 1024, 2)
             nn.BatchNorm1d(1024), nn.ReLU(True),
-            nn.Conv1d(1024, 2048, kernel_size=2, stride=2),                 # Output: (B, 2048, 1)
-            nn.BatchNorm1d(2048), nn.ReLU(True),
+            nn.Conv1d(1024, 2048, kernel_size=2, stride=1),                 # Output: (B, 2048, 1)
         )
 
     def forward(self, x):
@@ -47,8 +46,8 @@ class MAEDecoderBlock(nn.Module):
         super().__init__()
         self.in_ch = in_ch
         self.decoder = nn.Sequential(
-            # Input: (B, 2048, 1)
-            nn.ConvTranspose1d(2048, 1024, kernel_size=2, stride=2),        # Output: (B, 1024, 2)
+            # Input: (B, 2048, 2)
+            nn.ConvTranspose1d(2048, 1024, kernel_size=2, stride=1),        # Output: (B, 1024, 2)
             nn.BatchNorm1d(1024), nn.ReLU(True),
             nn.ConvTranspose1d(1024, 1024, kernel_size=4, padding=1, stride=2), # Output: (B, 1024, 4)
             nn.BatchNorm1d(1024), nn.ReLU(True),
