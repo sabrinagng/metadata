@@ -12,6 +12,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, random_split
+from torch.optim.lr_scheduler import CosineAnnealingLR
 from tqdm import tqdm
 
 from model import EMGMaskedAE
@@ -69,14 +70,15 @@ def train(args):
     in_ch = train_ds[0][0].shape[0]
     model = EMGMaskedAE(
         in_ch=in_ch,
-        mask_type=MASK_TYPE,
         mask_ratio=MASK_RATIO,
         block_len=args.block_len,
+        mask_type=MASK_TYPE,
         different_mask_per_channel=True,
         device=DEVICE
     ).to(DEVICE)
     optim = torch.optim.Adam(model.parameters(), lr=args.lr)
-    scaler = torch.cuda.amp.GradScaler()
+    scheduler = CosineAnnealingLR(optim, T_max=args.epochs, eta_min=3e-5)
+    scaler = torch.amp.GradScaler('cuda')
 
     # --- Model Summary ---
     table = PrettyTable(["Layer Name", "Shape", "N. of Parameters"])
@@ -134,6 +136,8 @@ def train(args):
                 optim.zero_grad()
                 scaler.scale(loss).backward()
                 scaler.step(optim)
+                scheduler.step()
+
                 scaler.update()
 
                 step += 1
