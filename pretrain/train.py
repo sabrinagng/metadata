@@ -28,9 +28,8 @@ NUM_WORKERS     = 0
 # Model parameters
 MASK_TYPE       = 'block'
 MASK_RATIO      = 0.4
-BLOCK_LEN       = 512
 
-def train(report, batch_size, epochs, lr):
+def train(args):
     print(f'Using device: {DEVICE}', flush=True)
     if DEVICE.type == 'cuda':
         print(f'Found {torch.cuda.device_count()} CUDA device(s).', flush=True)
@@ -41,7 +40,7 @@ def train(report, batch_size, epochs, lr):
     print(f'Finished loading dataset with length {len(train_ds)}.')
     train_dl = DataLoader(
         train_ds,
-        batch_size=batch_size,
+        batch_size=args.batch_size,
         shuffle=True,
         num_workers=NUM_WORKERS,
         pin_memory=True,
@@ -54,7 +53,7 @@ def train(report, batch_size, epochs, lr):
         if len(test_ds) > 0:
             test_dl = DataLoader(
                 test_ds,
-                batch_size=batch_size,
+                batch_size=args.batch_size,
                 shuffle=False,
                 num_workers=NUM_WORKERS,
                 pin_memory=True,
@@ -72,11 +71,11 @@ def train(report, batch_size, epochs, lr):
         in_ch=in_ch,
         mask_type=MASK_TYPE,
         mask_ratio=MASK_RATIO,
-        block_len=BLOCK_LEN,
+        block_len=args.block_len,
         different_mask_per_channel=True,
         device=DEVICE
     ).to(DEVICE)
-    optim = torch.optim.Adam(model.parameters(), lr=lr)
+    optim = torch.optim.Adam(model.parameters(), lr=args.lr)
     scaler = torch.cuda.amp.GradScaler()
 
     # --- Model Summary ---
@@ -90,7 +89,7 @@ def train(report, batch_size, epochs, lr):
     print(f"Total Trainable Params: {total_params}")
 
     # --- Initialize training report ---
-    if report:
+    if args.report:
         report_data = {
             'model_parameters': {
                 'in_ch': in_ch,
@@ -102,9 +101,9 @@ def train(report, batch_size, epochs, lr):
                 'device': str(model.device),
             },
             'training_parameters': {
-                'epochs': epochs,
-                'batch_size': batch_size,
-                'learning_rate': lr,
+                'epochs': args.epochs,
+                'batch_size': args.batch_size,
+                'learning_rate': args.lr,
             },
             'loss_history': [],
             'test_loss_history': []
@@ -113,14 +112,14 @@ def train(report, batch_size, epochs, lr):
         report_path = f'pretrain/training_report/{model.mask_type}/training_report_{training_start_time}.json'
         print(f'Training report will be saved to {report_path}', flush=True)
 
-    total_steps = epochs * len(train_dl)
+    total_steps = args.epochs * len(train_dl)
     step = 0
 
     with tqdm(total=total_steps,
               desc='Training',
               unit='step') as pbar:
 
-        for epoch in range(1, epochs + 1):
+        for epoch in range(1, args.epochs + 1):
             model.train()
             epoch_loss = 0.0
             for x, _ in train_dl:
@@ -143,7 +142,7 @@ def train(report, batch_size, epochs, lr):
                                  lr=f"{optim.param_groups[0]['lr']:.1e}")
                 pbar.update(1)
 
-            if report:
+            if args.report:
                 avg_epoch_loss = epoch_loss / len(train_dl)
                 report_data['loss_history'].append(avg_epoch_loss)
 
@@ -163,12 +162,12 @@ def train(report, batch_size, epochs, lr):
                         test_pbar.set_postfix(loss=f'{current_avg_loss:.6f}')
 
                 avg_test_loss = total_test_loss / len(test_dl)
-                if report:
+                if args.report:
                     report_data['test_loss_history'].append(avg_test_loss)
                 tqdm.write(f'Epoch {epoch} | Test Loss: {avg_test_loss:.6f}')
 
             # --- Save Model at End of Each Epoch ---
-            if epoch % 5 == 0 or epoch == epochs:
+            if epoch % 5 == 0 or epoch == args.epochs:
                 ckpt_dir = f'pretrain/checkpoints/{model.mask_type}/{training_start_time}'
                 os.makedirs(ckpt_dir, exist_ok=True)
 
@@ -177,7 +176,7 @@ def train(report, batch_size, epochs, lr):
 
                 tqdm.write(f'  -> Saved model at epoch {epoch} to {ckpt_path}')
  
-    if report:
+    if args.report:
         with open(report_path, 'w') as f:
             json.dump(report_data, f, indent=4)
         print('Saved training_report.json', flush=True)
@@ -189,6 +188,7 @@ if __name__ == '__main__':
     parser.add_argument('--batch-size', type=int, default=1024, help=f'Batch size for training (default: 1024)')
     parser.add_argument('--epochs', type=int, default=50, help=f'Number of training epochs (default: 50)')
     parser.add_argument('--lr', type=float, default=1e-3, help=f'Learning rate (default: 1e-3)')
+    parser.add_argument('--block-len', type=int, default=512, help='Length of frequency blocks for masking (default: 512)')
     args = parser.parse_args()
 
-    train(report=args.report, batch_size=args.batch_size, epochs=args.epochs, lr=args.lr)
+    train(args)
