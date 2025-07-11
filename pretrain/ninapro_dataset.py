@@ -27,6 +27,8 @@ class NinaproDataset(Dataset):
         """
         file_path = os.path.join(self.data_dir, self.file_list[idx])
         data = torch.load(file_path, weights_only=True)
+
+        data['feature'] = data['feature'].T  # Transpose to (C, T) format
         return data['feature'], data['label']
 
 if __name__ == '__main__':
