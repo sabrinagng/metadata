@@ -9,72 +9,56 @@ class MAEEncoderBlock(nn.Module):
     def __init__(self, in_ch: int):
         super().__init__()
         self.in_ch = in_ch
+
         self.encoder = nn.Sequential(
-            # Input: (B, 12, 8192)
-            nn.Conv1d(self.in_ch, 32, kernel_size=3, padding=1, stride=2),  # Output: (B, 32, 4096)
-            nn.BatchNorm1d(32), nn.ReLU(True),
-            nn.Conv1d(32, 32, kernel_size=3, padding=1, stride=2),          # Output: (B, 32, 2048)
-            nn.BatchNorm1d(32), nn.ReLU(True),
-            nn.Conv1d(32, 64, kernel_size=3, padding=1, stride=2),          # Output: (B, 64, 1024)
-            nn.BatchNorm1d(64), nn.ReLU(True),
-            nn.Conv1d(64, 64, kernel_size=3, padding=1, stride=2),          # Output: (B, 64, 512)
-            nn.BatchNorm1d(64), nn.ReLU(True),
-            nn.Conv1d(64, 128, kernel_size=3, padding=1, stride=2),         # Output: (B, 128, 256)
-            nn.BatchNorm1d(128), nn.ReLU(True),
-            nn.Conv1d(128, 128, kernel_size=3, padding=1, stride=2),        # Output: (B, 128, 128)
-            nn.BatchNorm1d(128), nn.ReLU(True),
-            nn.Conv1d(128, 256, kernel_size=3, padding=1, stride=2),        # Output: (B, 256, 64)
-            nn.BatchNorm1d(256), nn.ReLU(True),
-            nn.Conv1d(256, 256, kernel_size=3, padding=1, stride=2),        # Output: (B, 256, 32)
-            nn.BatchNorm1d(256), nn.ReLU(True),
-            nn.Conv1d(256, 512, kernel_size=3, padding=1, stride=2),        # Output: (B, 512, 16)
-            nn.BatchNorm1d(512), nn.ReLU(True),
-            nn.Conv1d(512, 512, kernel_size=3, padding=1, stride=2),        # Output: (B, 512, 8)
-            nn.BatchNorm1d(512), nn.ReLU(True),
-            nn.Conv1d(512, 1024, kernel_size=3, padding=1, stride=2),       # Output: (B, 1024, 4)
-            nn.BatchNorm1d(1024), nn.ReLU(True),
-            nn.Conv1d(1024, 1024, kernel_size=3, padding=1, stride=2),      # Output: (B, 1024, 2)
-            nn.BatchNorm1d(1024), nn.ReLU(True),
-            nn.Conv1d(1024, 2048, kernel_size=2, stride=1),                 # Output: (B, 2048, 1)
+            nn.Conv1d( in_channels=in_ch,  out_channels=32,  kernel_size=3, stride=2, padding=1), nn.BatchNorm1d(32),  nn.GELU(),  # 8192→4096
+            nn.Conv1d( in_channels=32,     out_channels=32,  kernel_size=3, stride=2, padding=1), nn.BatchNorm1d(32),  nn.GELU(),  # 4096→2048
+            nn.Conv1d( in_channels=32,     out_channels=64,  kernel_size=3, stride=2, padding=1), nn.BatchNorm1d(64),  nn.GELU(),  # 2048→1024
+            nn.Conv1d( in_channels=64,     out_channels=64,  kernel_size=3, stride=2, padding=1), nn.BatchNorm1d(64),  nn.GELU(),  # 1024→512
+            nn.Conv1d( in_channels=64,     out_channels=128, kernel_size=3, stride=2, padding=1), nn.BatchNorm1d(128), nn.GELU(),  # 512 →256
+            nn.Conv1d( in_channels=128,    out_channels=128, kernel_size=3, stride=2, padding=1), nn.BatchNorm1d(128), nn.GELU(),  # 256 →128
+            nn.Conv1d( in_channels=128,    out_channels=256, kernel_size=3, stride=2, padding=1), nn.BatchNorm1d(256), nn.GELU(),  # 128 →64
+            nn.Conv1d( in_channels=256,    out_channels=512, kernel_size=3, stride=2, padding=1), nn.BatchNorm1d(512), nn.GELU(),  # 64  →32
+            nn.Conv1d( in_channels=512,    out_channels=1024,kernel_size=3, stride=1, padding=1), nn.BatchNorm1d(1024),nn.GELU(),  # keep 32
         )
 
-    def forward(self, x):
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.encoder(x)
 
 class MAEDecoderBlock(nn.Module):
-    def __init__(self, in_ch: int):
+    """
+    Upsamples (B, 1024, 32) back to (B, C, 8192) in three stages:
+        32 → 128 → 512 → 8192
+    """
+    def __init__(self, out_ch: int):
         super().__init__()
-        self.in_ch = in_ch
+
+        mid_dim   = 256          # fixed internal width
+        latent_in = 1024         # must match encoder’s last channel count
+
         self.decoder = nn.Sequential(
-            # Input: (B, 2048, 2)
-            nn.ConvTranspose1d(2048, 1024, kernel_size=2, stride=1),        # Output: (B, 1024, 2)
-            nn.BatchNorm1d(1024), nn.ReLU(True),
-            nn.ConvTranspose1d(1024, 1024, kernel_size=4, padding=1, stride=2), # Output: (B, 1024, 4)
-            nn.BatchNorm1d(1024), nn.ReLU(True),
-            nn.ConvTranspose1d(1024, 512, kernel_size=4, padding=1, stride=2),  # Output: (B, 512, 8)
-            nn.BatchNorm1d(512), nn.ReLU(True),
-            nn.ConvTranspose1d(512, 512, kernel_size=4, padding=1, stride=2),   # Output: (B, 512, 16)
-            nn.BatchNorm1d(512), nn.ReLU(True),
-            nn.ConvTranspose1d(512, 256, kernel_size=4, padding=1, stride=2),   # Output: (B, 256, 32)
-            nn.BatchNorm1d(256), nn.ReLU(True),
-            nn.ConvTranspose1d(256, 256, kernel_size=4, padding=1, stride=2),   # Output: (B, 256, 64)
-            nn.BatchNorm1d(256), nn.ReLU(True),
-            nn.ConvTranspose1d(256, 128, kernel_size=4, padding=1, stride=2),   # Output: (B, 128, 128)
-            nn.BatchNorm1d(128), nn.ReLU(True),
-            nn.ConvTranspose1d(128, 128, kernel_size=4, padding=1, stride=2),   # Output: (B, 128, 256)
-            nn.BatchNorm1d(128), nn.ReLU(True),
-            nn.ConvTranspose1d(128, 64, kernel_size=4, padding=1, stride=2),    # Output: (B, 64, 512)
-            nn.BatchNorm1d(64), nn.ReLU(True),
-            nn.ConvTranspose1d(64, 64, kernel_size=4, padding=1, stride=2),     # Output: (B, 64, 1024)
-            nn.BatchNorm1d(64), nn.ReLU(True),
-            nn.ConvTranspose1d(64, 32, kernel_size=4, padding=1, stride=2),     # Output: (B, 32, 2048)
-            nn.BatchNorm1d(32), nn.ReLU(True),
-            nn.ConvTranspose1d(32, 32, kernel_size=4, padding=1, stride=2),     # Output: (B, 32, 4096)
-            nn.BatchNorm1d(32), nn.ReLU(True),
-            nn.ConvTranspose1d(32, self.in_ch, kernel_size=4, padding=1, stride=2), # Output: (B, in_ch, 8192)
+            nn.Conv1d( in_channels=latent_in, out_channels=mid_dim, kernel_size=1), nn.GELU(),
+
+            # 32 → 128
+            nn.ConvTranspose1d(in_channels=mid_dim, out_channels=mid_dim, kernel_size=4, stride=4, padding=0), nn.GELU(),
+            nn.Conv1d(in_channels=mid_dim, out_channels=mid_dim, kernel_size=3, stride=1, padding=1), nn.GELU(),
+
+            # 128 → 512
+            nn.ConvTranspose1d(in_channels=mid_dim, out_channels=mid_dim, kernel_size=4, stride=4, padding=0), nn.GELU(),
+            nn.Conv1d(in_channels=mid_dim, out_channels=mid_dim, kernel_size=3, stride=1, padding=1), nn.GELU(),
+
+            # 512 → 8192
+            nn.ConvTranspose1d(in_channels=mid_dim, out_channels=out_ch, kernel_size=16, stride=16, padding=0),
         )
 
-    def forward(self, x):
+        # sanity check
+        L = 32
+        for k, s in [(4,4), (4,4), (16,16)]:
+            L = (L - 1) * s + k
+        assert L == 8192, "decoder length mismatch (got %d)" % L
+        
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.decoder(x)
 
 class EMGMaskedAE(nn.Module):
@@ -117,7 +101,7 @@ class EMGMaskedAE(nn.Module):
         self.device = device
 
         self.encoder = MAEEncoderBlock(in_ch=self.in_ch)
-        self.decoder = MAEDecoderBlock(in_ch=self.in_ch)
+        self.decoder = MAEDecoderBlock(out_ch=self.in_ch)
 
         self.mask = None # To store the mask used during forward pass
 
@@ -128,8 +112,9 @@ class EMGMaskedAE(nn.Module):
         idx = torch.randint(0, T, (B, num), device=x.device)
         mask.scatter_(2, idx.unsqueeze(1), True)
         
-        x_masked = x.masked_fill(mask.expand_as(x), 0.)
-        self.mask = mask
+        mask_full = mask.expand(B, C, T)
+        x_masked = x.masked_fill(mask_full, 0.)
+        self.mask = mask_full
         
         return x_masked
 
@@ -181,7 +166,7 @@ class EMGMaskedAE(nn.Module):
         Not implemented yet.
         This method applies frequency masking in the frequency domain.
         """
-        pass
+        raise NotImplementedError("freq masking not implemented yet")
     
 
     def forward(self, x):
@@ -198,13 +183,41 @@ class EMGMaskedAE(nn.Module):
         reconstructed = self.decoder(latent)
         return reconstructed
 
-    def compute_loss(self, reconstructed, original, masked_weight=0.95):
-        loss_mask = F.smooth_l1_loss(reconstructed[self.mask], original[self.mask])
-        inv_mask = ~self.mask
-        loss_unmask = F.smooth_l1_loss(reconstructed[inv_mask], original[inv_mask])
+    def compute_loss(self, reconstructed: torch.Tensor, original: torch.Tensor, spec_weight: float = 0.0):
+        """Composite loss = time-domain Smooth-L1  +  spectral L1.
 
-        overall_loss = masked_weight * loss_mask + (1 - masked_weight) * loss_unmask
-        return overall_loss
+        Args
+        ----
+        reconstructed : (B, C, T)
+        original      : (B, C, T)
+        spec_weight   : weight for the spectral term. 0 ⇒ time-domain only.
+        """
+        if self.mask is None:
+            raise RuntimeError("Mask has not been generated before loss computation.")
+
+        # ── time-domain loss on masked tokens ──
+        l_time = F.smooth_l1_loss(
+            reconstructed[self.mask],
+            original[self.mask],
+        )
+
+        if spec_weight == 0.0:
+            return l_time
+
+        # ── simple magnitude‑spectrum loss (FFT) ──
+        # Only compute on the **masked** portions to keep behaviour consistent.
+        # Gather the masked samples, FFT over last axis, compare magnitude.
+        rec_masked = reconstructed[self.mask].view(-1, n)  # flatten
+        orig_masked = original[self.mask].view(-1, n)
+
+        # zero‑pad to next power‑of‑two for speed / identical length
+        n = 1 << (rec_masked.numel() - 1).bit_length()
+        rec_fft  = torch.fft.rfft(rec_masked, n=n)
+        orig_fft = torch.fft.rfft(orig_masked, n=n)
+        l_spec = torch.mean(torch.abs(torch.abs(rec_fft) - torch.abs(orig_fft)))
+
+        return l_time + spec_weight * l_spec
+
 
 ## CNN-LSTM Predictor for EMG signals
 # This model implements a CNN-LSTM architecture for predicting future EMG signals.
