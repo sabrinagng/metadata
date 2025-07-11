@@ -26,9 +26,9 @@ TEST_DATA_PATH  = 'data/processed/DB3_emg_only_all_subjects'
 NUM_WORKERS     = 0
 
 # Training parameters
-BATCH_SIZE      = 32
+BATCH_SIZE      = 1024
 EPOCHS          = 50
-LR              = 1e-3
+LR              = 5e-3
 
 # Model parameters
 MASK_TYPE       = 'block'
@@ -49,7 +49,7 @@ def train(report=False, test=False):
         batch_size=BATCH_SIZE,
         shuffle=True,
         num_workers=NUM_WORKERS,
-        pin_memory=False,
+        pin_memory=True,
     )
 
     # --- Test Data Loading (Optional) ---
@@ -63,7 +63,7 @@ def train(report=False, test=False):
                     batch_size=BATCH_SIZE,
                     shuffle=False,
                     num_workers=NUM_WORKERS,
-                    pin_memory=False,
+                    pin_memory=True,
                 )
                 print(f'Loaded {len(test_ds)} test windows for per-epoch evaluation.', flush=True)
             else:
@@ -83,6 +83,7 @@ def train(report=False, test=False):
         device=DEVICE
     ).to(DEVICE)
     optim = torch.optim.Adam(model.parameters(), lr=LR)
+    scaler = torch.cuda.amp.GradScaler()
 
     # --- Model Summary ---
     table = PrettyTable(["Layer Name", "Shape", "N. of Parameters"])
@@ -131,14 +132,16 @@ def train(report=False, test=False):
             for x, _ in train_dl:
                 x = x.to(DEVICE, non_blocking=True)
 
-                reconstructed = model(x)
-                loss = model.compute_loss(reconstructed, x)
+                with torch.amp.autocast('cuda'):
+                    reconstructed = model(x)
+                    loss = model.compute_loss(reconstructed, x)
 
                 epoch_loss += loss.item()
 
                 optim.zero_grad()
-                loss.backward()
-                optim.step()
+                scaler.scale(loss).backward()
+                scaler.step(optim)
+                scaler.update()
 
                 step += 1
                 pbar.set_postfix(epoch=epoch,
@@ -156,10 +159,10 @@ def train(report=False, test=False):
                 total_test_loss = 0.0
                 with torch.no_grad():
                     test_pbar = tqdm(test_dl, desc=f'Testing epoch {epoch}', leave=False)
-                    for x_test in test_pbar:
+                    for x_test, _ in test_pbar:
                         x_test = x_test.to(DEVICE, non_blocking=True)
                         reconstructed = model(x_test)
-                        # Use the new loss function for testing as well
+
                         loss = model.compute_loss(reconstructed, x_test)
                         total_test_loss += loss.item()
                         current_avg_loss = total_test_loss / (test_pbar.n + 1)
