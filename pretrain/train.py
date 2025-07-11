@@ -25,17 +25,12 @@ TRAIN_DATA_PATH = 'data/processed/DB2_emg_only_all_subjects'
 TEST_DATA_PATH  = 'data/processed/DB3_emg_only_all_subjects'
 NUM_WORKERS     = 0
 
-# Training parameters
-BATCH_SIZE      = 1024
-EPOCHS          = 50
-LR              = 5e-3
-
 # Model parameters
 MASK_TYPE       = 'block'
 MASK_RATIO      = 0.4
 BLOCK_LEN       = 512
 
-def train(report=False, test=False):
+def train(report, batch_size, epochs, lr):
     print(f'Using device: {DEVICE}', flush=True)
     if DEVICE.type == 'cuda':
         print(f'Found {torch.cuda.device_count()} CUDA device(s).', flush=True)
@@ -46,7 +41,7 @@ def train(report=False, test=False):
     print(f'Finished loading dataset with length {len(train_ds)}.')
     train_dl = DataLoader(
         train_ds,
-        batch_size=BATCH_SIZE,
+        batch_size=batch_size,
         shuffle=True,
         num_workers=NUM_WORKERS,
         pin_memory=True,
@@ -54,22 +49,21 @@ def train(report=False, test=False):
 
     # --- Test Data Loading (Optional) ---
     test_dl = None
-    if test:
-        try:
-            test_ds = NinaproDataset(TEST_DATA_PATH)
-            if len(test_ds) > 0:
-                test_dl = DataLoader(
-                    test_ds,
-                    batch_size=BATCH_SIZE,
-                    shuffle=False,
-                    num_workers=NUM_WORKERS,
-                    pin_memory=True,
-                )
-                print(f'Loaded {len(test_ds)} test windows for per-epoch evaluation.', flush=True)
-            else:
-                print("Warning: Test data folder provided, but no data was found.", flush=True)
-        except Exception as e:
-            print(f"Warning: Could not load test data: {e}", flush=True)
+    try:
+        test_ds = NinaproDataset(TEST_DATA_PATH)
+        if len(test_ds) > 0:
+            test_dl = DataLoader(
+                test_ds,
+                batch_size=batch_size,
+                shuffle=False,
+                num_workers=NUM_WORKERS,
+                pin_memory=True,
+            )
+            print(f'Loaded {len(test_ds)} test windows for per-epoch evaluation.', flush=True)
+        else:
+            print("Warning: Test data folder provided, but no data was found.", flush=True)
+    except Exception as e:
+        print(f"Warning: Could not load test data: {e}", flush=True)
 
 
     # ---------------- Model ----------------
@@ -82,7 +76,7 @@ def train(report=False, test=False):
         different_mask_per_channel=True,
         device=DEVICE
     ).to(DEVICE)
-    optim = torch.optim.Adam(model.parameters(), lr=LR)
+    optim = torch.optim.Adam(model.parameters(), lr=lr)
     scaler = torch.cuda.amp.GradScaler()
 
     # --- Model Summary ---
@@ -108,9 +102,9 @@ def train(report=False, test=False):
                 'device': str(model.device),
             },
             'training_parameters': {
-                'epochs': EPOCHS,
-                'batch_size': BATCH_SIZE,
-                'learning_rate': LR,
+                'epochs': epochs,
+                'batch_size': batch_size,
+                'learning_rate': lr,
             },
             'loss_history': [],
             'test_loss_history': []
@@ -119,14 +113,14 @@ def train(report=False, test=False):
         report_path = f'pretrain/training_report/{model.mask_type}/training_report_{training_start_time}.json'
         print(f'Training report will be saved to {report_path}', flush=True)
 
-    total_steps = EPOCHS * len(train_dl)
+    total_steps = epochs * len(train_dl)
     step = 0
 
     with tqdm(total=total_steps,
               desc='Training',
               unit='step') as pbar:
 
-        for epoch in range(1, EPOCHS + 1):
+        for epoch in range(1, epochs + 1):
             model.train()
             epoch_loss = 0.0
             for x, _ in train_dl:
@@ -174,7 +168,7 @@ def train(report=False, test=False):
                 tqdm.write(f'Epoch {epoch} | Test Loss: {avg_test_loss:.6f}')
 
             # --- Save Model at End of Each Epoch ---
-            if epoch % 5 == 0 or epoch == EPOCHS:
+            if epoch % 5 == 0 or epoch == epochs:
                 ckpt_dir = f'pretrain/checkpoints/{model.mask_type}/{training_start_time}'
                 os.makedirs(ckpt_dir, exist_ok=True)
 
@@ -192,7 +186,9 @@ def train(report=False, test=False):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Train EMG Masked Autoencoder with per-channel frequency masking.')
     parser.add_argument('--report', action='store_true', help='Enable saving a training report.')
-    parser.add_argument('--test', action='store_true', help='Enable per-epoch test evaluation.')
+    parser.add_argument('--batch-size', type=int, default=1024, help=f'Batch size for training (default: 1024)')
+    parser.add_argument('--epochs', type=int, default=50, help=f'Number of training epochs (default: 50)')
+    parser.add_argument('--lr', type=float, default=1e-3, help=f'Learning rate (default: 1e-3)')
     args = parser.parse_args()
 
-    train(report=args.report, test=args.test)
+    train(report=args.report, batch_size=args.batch_size, epochs=args.epochs, lr=args.lr)
