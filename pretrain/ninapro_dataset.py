@@ -29,6 +29,7 @@ class NinaproDataset(Dataset):
         data = torch.load(file_path, weights_only=True)
 
         data['feature'] = data['feature'].T  # Transpose to (C, T) format
+        data['feature'] *= 1e3  # Scale features to mV
         return data['feature'], data['label']
 
 if __name__ == '__main__':
